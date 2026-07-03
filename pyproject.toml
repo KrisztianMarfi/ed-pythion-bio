@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ed-bio-helper"
+version = "1.0.0"
+description = "Elite Dangerous Odyssey exobiology sampling assistant (console TUI)"
+requires-python = ">=3.10"
+dependencies = ["rich>=13"]
+
+[project.scripts]
+ed-bio-helper = "ed_bio_helper.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

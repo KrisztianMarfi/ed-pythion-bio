@@ -2,6 +2,9 @@
 
 A small Linux console TUI companion for **Elite Dangerous: Odyssey** exobiology.
 
+** This has been created with the help of Claude. If yo uare against AI or 
+   AI assisted coding, please ignore it. ** 
+
 It tails the game's journal and `Status.json` in real time, predicts which
 organisms a body can host and what they're worth, and gives you live
 sampling-distance guidance while you're on foot — all in a terminal next to the

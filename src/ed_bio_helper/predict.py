@@ -418,21 +418,23 @@ _CATALOG: dict[str, dict[str, dict]] = {
 
     # ── Electricae ────────────────────────────────────────────────────────────
     '$Codex_Ent_Electricae_Genus_Name;': {
+        # Electricae only spawns near hot/exotic parent stars: type A (luminosity V or
+        # brighter), B, O, white dwarf (D*), neutron (N), or black hole (H). Not F/G/K.
         '$Codex_Ent_Electricae_01_Name;': {'name': 'Electricae Pluma', 'value': 6284600, 'rulesets': [
             {'atmosphere': ['Argon', 'ArgonRich'], 'body_type': ['Icy body'],
              'min_gravity': 0.025, 'max_gravity': 0.276, 'min_temperature': 50.0, 'max_temperature': 150.0,
-             'parent_star': ['A', 'F', 'G', 'K', 'AeBe']},
+             'parent_star': [('A', 'V'), 'B', 'O', 'D', 'N', 'H']},
             {'atmosphere': ['Neon', 'NeonRich'], 'body_type': ['Icy body'],
              'min_gravity': 0.26, 'max_gravity': 0.276, 'min_temperature': 20.0, 'max_temperature': 70.0,
-             'max_pressure': 0.005, 'parent_star': ['A', 'F', 'G', 'K', 'AeBe']},
+             'max_pressure': 0.005, 'parent_star': [('A', 'V'), 'B', 'O', 'D', 'N', 'H']},
         ]},
         '$Codex_Ent_Electricae_02_Name;': {'name': 'Electricae Radialem', 'value': 6284600, 'rulesets': [
             {'atmosphere': ['Argon', 'ArgonRich'], 'body_type': ['Icy body'],
              'min_gravity': 0.025, 'max_gravity': 0.276, 'min_temperature': 50.0, 'max_temperature': 150.0,
-             'nebula': 'all'},
+             'parent_star': [('A', 'V'), 'B', 'O', 'D', 'N', 'H'], 'nebula': 'all'},
             {'atmosphere': ['Neon', 'NeonRich'], 'body_type': ['Icy body'],
              'min_gravity': 0.026, 'max_gravity': 0.276, 'min_temperature': 20.0, 'max_temperature': 70.0,
-             'max_pressure': 0.005, 'nebula': 'all'},
+             'max_pressure': 0.005, 'parent_star': [('A', 'V'), 'B', 'O', 'D', 'N', 'H'], 'nebula': 'all'},
         ]},
     },
 
@@ -1156,6 +1158,47 @@ def _star_matches(query: str, star_type: str) -> bool:
         case _: return star_type == query
 
 
+# Luminosity brightness rank (larger = brighter). Elite journal luminosity strings
+# carry subclasses (Va, Vz, Iab, Ia0, …); we normalise to the base class before
+# ranking. Used for ">= class V" style parent-star gates (see _parent_star_matches).
+_LUM_RANK = {
+    'Ia0': 8, '0': 8, 'Ia': 7, 'I': 7, 'Iab': 6, 'Ib': 5,
+    'II': 4, 'III': 3, 'IV': 2, 'V': 1, 'VI': 0, 'VII': -1,
+}
+# Checked longest/most-specific first so e.g. 'VII' isn't read as 'V', 'Iab' not as 'Ia'.
+_LUM_PREFIXES = ('VII', 'VI', 'V', 'IV', 'III', 'II', 'Ia0', 'Iab', 'Ia', 'Ib', 'I', '0')
+
+
+def _luminosity_rank(lum: str) -> int | None:
+    """Brightness rank of an Elite luminosity string, or None if unknown/empty."""
+    s = (lum or '').strip()
+    if not s:
+        return None
+    for key in _LUM_PREFIXES:
+        if s.startswith(key):
+            return _LUM_RANK[key]
+    return None
+
+
+def _parent_star_matches(entry, star_type: str, luminosity: str) -> bool:
+    """Match one parent_star rule entry against a (type, luminosity) star.
+
+    An entry is either a type string (e.g. 'A') or a ('A', 'V') pair meaning the
+    star must be that type *and* luminosity class V or brighter. Unknown luminosity
+    fails a luminosity-gated entry (better to under-predict than over-predict).
+    """
+    if isinstance(entry, (tuple, list)):
+        req_type, min_lum = entry[0], entry[1]
+        if not _star_matches(req_type, star_type):
+            return False
+        thr = _luminosity_rank(min_lum)
+        if thr is None:
+            return True
+        rank = _luminosity_rank(luminosity)
+        return rank is not None and rank >= thr
+    return _star_matches(entry, star_type)
+
+
 def _ruleset_matches(
     ruleset: dict,
     planet_class: str,
@@ -1242,7 +1285,8 @@ def _ruleset_matches(
         if not candidate_stars:
             candidate_stars = all_stars  # fall back to all stars if parent chain unknown
         if candidate_stars:
-            if not any(_star_matches(req, st) for req in ps_rule for st, _ in candidate_stars):
+            if not any(_parent_star_matches(req, st, lum)
+                       for req in ps_rule for st, lum in candidate_stars):
                 return False
 
     # star — check against all stars in system
@@ -1482,7 +1526,7 @@ def _categorical_fails(
     if ps_rule is not None and (sys_stars or all_stars):
         candidate_stars = [sys_stars[pid] for pid in par_ids if pid in sys_stars] or all_stars
         if candidate_stars and not any(
-            _star_matches(req, st) for req in ps_rule for st, _ in candidate_stars
+            _parent_star_matches(req, st, lum) for req in ps_rule for st, lum in candidate_stars
         ):
             fails.append('parent_star')
 

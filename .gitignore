@@ -44,3 +44,6 @@ stats.txt
 *.swp
 *~
 .DS_Store
+
+ARCHITECTURE.md
+CLAUDE.md

@@ -66,12 +66,12 @@ _CATALOG: dict[str, dict[str, dict]] = {
         '$Codex_Ent_Sphere_Name;': {'name': 'Luteolum Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.044, 'max_gravity': 1.28, 'min_temperature': 200.0, 'max_temperature': 440.0,
              'volcanism': ['metallic', 'silicate', 'rocky', 'water'], 'body_type': ['Rocky body'],
-             'star': [('B', 'IV'), ('C', 'V')], 'regions': ['anemone-a']},
+             'star': [('B', 'IV'), ('B', 'V')], 'regions': ['anemone-a']},
         ]},
         '$Codex_Ent_SphereABCD_01_Name;': {'name': 'Croceum Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.047, 'max_gravity': 0.37, 'min_temperature': 200.0, 'max_temperature': 440.0,
              'volcanism': ['silicate', 'rocky', 'metallic'], 'body_type': ['Rocky body'],
-             'star': [('B', 'V'), ('B', 'VI'), ('A', 'III')], 'regions': ['anemone-a']},
+             'star': [('B', 'VI'), ('A', 'III')], 'regions': ['anemone-a']},
         ]},
         '$Codex_Ent_SphereABCD_02_Name;': {'name': 'Puniceum Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.17, 'max_gravity': 2.52, 'min_temperature': 65.0, 'max_temperature': 800.0,
@@ -84,12 +84,12 @@ _CATALOG: dict[str, dict[str, dict]] = {
         '$Codex_Ent_SphereABCD_03_Name;': {'name': 'Roseum Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.045, 'max_gravity': 0.37, 'min_temperature': 200.0, 'max_temperature': 440.0,
              'volcanism': ['silicate', 'rocky', 'metallic'], 'body_type': ['Rocky body'],
-             'star': [('C', 'I'), ('C', 'II'), ('B', 'III'), ('C', 'IV')], 'regions': ['anemone-a']},
+             'star': [('B', 'I'), ('B', 'II'), ('B', 'III')], 'regions': ['anemone-a']},
         ]},
         '$Codex_Ent_SphereEFGH_01_Name;': {'name': 'Rubeum Bioluminescent Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.036, 'max_gravity': 4.61, 'min_temperature': 160.0, 'max_temperature': 1800.0,
              'volcanism': 'Any', 'body_type': ['Metal rich body', 'High metal content body'],
-             'star': [('C', 'VI'), ('A', 'I'), ('A', 'II'), ('A', 'III'), 'M']},
+             'star': [('B', 'VI'), ('A', 'III')]},
         ]},
         '$Codex_Ent_SphereEFGH_02_Name;': {'name': 'Prasinum Bioluminescent Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.036, 'min_temperature': 110.0, 'max_temperature': 3050.0,
@@ -98,12 +98,12 @@ _CATALOG: dict[str, dict[str, dict]] = {
         '$Codex_Ent_SphereEFGH_03_Name;': {'name': 'Roseum Bioluminescent Anemone', 'value': 1499900, 'rulesets': [
             {'min_gravity': 0.036, 'max_gravity': 4.61, 'min_temperature': 400.0,
              'volcanism': 'Any', 'body_type': ['Metal rich body', 'High metal content body'],
-             'star': [('C', 'I'), ('C', 'II'), ('B', 'III')]},
+             'star': [('B', 'I'), ('B', 'II'), ('B', 'III')]},
         ]},
         '$Codex_Ent_SphereEFGH_Name;': {'name': 'Blatteum Bioluminescent Anemone', 'value': 1499900, 'rulesets': [
             {'min_temperature': 220.0, 'volcanism': 'Any',
              'body_type': ['Metal rich body', 'High metal content body'],
-             'star': [('B', 'IV'), ('C', 'V')], 'regions': ['anemone-a']},
+             'star': [('B', 'IV'), ('B', 'V')], 'regions': ['anemone-a']},
         ]},
     },
 
@@ -810,7 +810,7 @@ _CATALOG: dict[str, dict[str, dict]] = {
             {'atmosphere': ['None', 'Argon', 'ArgonRich', 'CarbonDioxide', 'CarbonDioxideRich',
                             'Helium', 'Methane', 'Neon', 'NeonRich'],
              'max_gravity': 2.0, 'max_temperature': 273.0,
-             'star': ['A', 'F', 'G', 'K', 'MS', 'S'],
+             'star': ['A', 'F', 'G', 'K', 'M', 'MS', 'S'],
              'distance': 12000.0,
              'bodies': ['Earthlike body', 'Ammonia world', 'Water world',
                         'Gas giant with water based life', 'Gas giant with ammonia based life', 'Water giant'],
@@ -1137,7 +1137,8 @@ _CATALOG: dict[str, dict[str, dict]] = {
              'star': 'A',
              'min_temperature': 1000.0, 'max_temperature': 1750.0,
              'volcanism': ['metallic', 'rocky', 'silicate'],
-             'bodies': ['Earthlike body', 'Gas giant with water based life', 'Water giant'],
+             'bodies': ['Earthlike body', 'Ammonia world', 'Gas giant with water based life',
+                        'Gas giant with ammonia based life', 'Water giant'],
              'regions': ['amphora']},
         ]},
     },
@@ -1178,6 +1179,22 @@ def _luminosity_rank(lum: str) -> int | None:
         if s.startswith(key):
             return _LUM_RANK[key]
     return None
+
+
+def _luminosity_base(lum: str) -> str:
+    """Base luminosity class of an Elite luminosity string: 'Ia'/'Iab'/'Ib' -> 'I',
+    'Va'/'Vz' -> 'V', 'IIIb' -> 'III', etc. Subclass suffixes are dropped so a rule
+    class like 'I' matches the journal's 'Ia'/'Ib' variants. Used by exact-class
+    `star` luminosity matching. Falls back to the stripped input if there is no
+    leading roman numeral (e.g. hypergiant '0')."""
+    s = (lum or '').strip()
+    base = ''
+    for ch in s:
+        if ch in ('I', 'V'):
+            base += ch
+        else:
+            break
+    return base or s
 
 
 def _parent_star_matches(entry, star_type: str, luminosity: str) -> bool:
@@ -1305,7 +1322,8 @@ def _ruleset_matches(
                         break
                 elif isinstance(entry, (tuple, list)) and len(entry) == 2:
                     req_type, req_lum = entry
-                    if any(_star_matches(req_type, st) and lum == req_lum
+                    if any(_star_matches(req_type, st)
+                           and _luminosity_base(lum) == _luminosity_base(req_lum)
                            for st, lum in all_stars):
                         matched = True
                         break
@@ -1544,7 +1562,8 @@ def _categorical_fails(
                         break
                 elif isinstance(entry, (tuple, list)) and len(entry) == 2:
                     req_type, req_lum = entry
-                    if any(_star_matches(req_type, st) and lum == req_lum
+                    if any(_star_matches(req_type, st)
+                           and _luminosity_base(lum) == _luminosity_base(req_lum)
                            for st, lum in all_stars):
                         matched = True
                         break

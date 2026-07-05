@@ -9,6 +9,7 @@ from pathlib import Path
 from rich.live import Live
 
 from .biology import genus_min_distance
+from .config import get_journal_dir, set_journal_dir
 from .corrections import Corrections
 from .geo import haversine
 from .history import compute_unsold_earnings
@@ -17,6 +18,7 @@ from .state import AppState
 from .stats import write_stats
 from .status import status_poller
 from .tui import build_display
+from .update import check_for_update
 
 
 _BELL_SOUND = '/usr/share/sounds/freedesktop/stereo/bell.oga'
@@ -92,11 +94,19 @@ _DEFAULT_JOURNAL_DIR = (
 
 
 def _resolve_journal_dir(cli_arg: str | None) -> Path:
+    # Precedence: explicit flag > env > saved config > built-in default.
+    # An explicit flag is persisted so it sticks on future launches; env is treated
+    # as a transient per-session override and is deliberately not saved.
     if cli_arg:
-        return Path(cli_arg).expanduser()
+        path = Path(cli_arg).expanduser().resolve()
+        set_journal_dir(str(path))
+        return path
     env = os.environ.get('ED_JOURNAL_DIR')
     if env:
         return Path(env).expanduser()
+    saved = get_journal_dir()
+    if saved:
+        return Path(saved).expanduser()
     return _DEFAULT_JOURNAL_DIR
 
 
@@ -128,6 +138,11 @@ def main() -> None:
         help='Print the local ruleset corrections learned from your samples, then exit',
     )
     parser.add_argument(
+        '--no-update',
+        action='store_true',
+        help='Skip the startup check for a newer tagged release',
+    )
+    parser.add_argument(
         '--stats-file',
         metavar='FILE',
         default='stats.txt',
@@ -139,6 +154,11 @@ def main() -> None:
     if args.show_corrections:
         print(Corrections().format_report())
         return
+
+    # Oh-My-Zsh-style: offer to pull a newer tagged release before the TUI takes over
+    # the terminal. Best-effort and skipped in replay mode (offline testing).
+    if not args.replay and not args.no_update:
+        check_for_update()
 
     journal_dir = _resolve_journal_dir(args.journal_dir)
 

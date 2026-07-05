@@ -32,6 +32,8 @@ game.
 - **Stats report** — a bio-payout-by-star text report written on launch.
 - **Self-calibrating** — learns and widens its prediction rulesets from the
   spawns you actually confirm.
+- **Self-updating** — an Oh-My-Zsh-style check on startup that offers to pull a
+  newer tagged release (git installs only).
 
 ## Requirements
 
@@ -63,7 +65,9 @@ The default journal directory is the Proton/Steam compatdata path:
 ```
 
 Override it with `--journal-dir PATH` or the `ED_JOURNAL_DIR` environment
-variable.
+variable. A path passed with `--journal-dir` is **remembered** for next time, so
+you only need to pass it once. Resolution order is: `--journal-dir` (saved) →
+`ED_JOURNAL_DIR` (transient, not saved) → last saved path → the built-in default.
 
 ### Options
 
@@ -74,6 +78,7 @@ variable.
 | `--speed N` | Replay speed multiplier (default: `1.0` = real time; `5` = 5× faster). |
 | `--stats-file FILE` | On launch, write a bio-payout-by-star report here (default: `./stats.txt`; pass `""` to disable). |
 | `--show-corrections` | Print the local ruleset corrections learned from your samples, then exit. |
+| `--no-update` | Skip the startup check for a newer tagged release (for this run). |
 
 ### Replay / testing
 
@@ -83,6 +88,57 @@ being in-game:
 ```sh
 ed-bio-helper --replay tests/fixtures/sample_journal.log --speed 5
 ```
+
+## Windows
+
+The app is pure Python and runs on Windows too, but it's primarily developed and
+tested on Linux, so treat Windows as best-effort. Two things differ:
+
+- **Journal directory.** The Proton/Steam default doesn't apply — point it at the
+  native Elite Dangerous journal location. With `--journal-dir` this is
+  remembered, so you only pass it once:
+
+  ```powershell
+  ed-bio-helper --journal-dir "$env:USERPROFILE\Saved Games\Frontier Developments\Elite Dangerous"
+  ```
+
+  Or set it for the session instead:
+
+  ```powershell
+  $env:ED_JOURNAL_DIR = "$env:USERPROFILE\Saved Games\Frontier Developments\Elite Dangerous"
+  ```
+
+- **Audio cues** rely on the Linux `paplay` command; on Windows they fall back to
+  the terminal bell (`\a`).
+
+Install is the same (`pip install -e .`), and the startup update check works if
+[Git for Windows](https://git-scm.com/download/win) is installed. Use a terminal
+with decent ANSI support — Windows Terminal is recommended over the legacy console.
+
+## Updating
+
+If you installed from a git clone, the app checks once a day on startup for a
+newer tagged release. When one exists it asks before doing anything:
+
+```
+  A new version of ed-bio-helper is available: v1.1.0 (you have v1.0.0).
+  Update now? [Y/n]
+```
+
+Answer `Y` (the default) and it runs `git pull --ff-only` and restarts itself;
+answer `n` and it just starts. The check is best-effort — if you're offline, git
+isn't a checkout, or you're not on a terminal, it silently does nothing. Local
+commits are never clobbered (a diverged checkout prints a manual-pull hint).
+
+Controls:
+
+| | |
+|------|-------------|
+| `--no-update` | Skip the check for this run. |
+| `ED_BIO_HELPER_NO_UPDATE=1` | Disable the check entirely. |
+| `ED_BIO_HELPER_UPDATE_INTERVAL=SECONDS` | Change the throttle window (default: `86400`). |
+
+The last-checked timestamp lives at `~/.local/share/ed-bio-helper/.last_update_check`.
 
 ## State & data
 
@@ -94,6 +150,15 @@ Per-body sample locations and scan progress are persisted to:
 
 This survives app restarts mid-expedition. Session credit totals reset on each
 app start.
+
+Stable preferences (currently your chosen journal directory) are stored
+separately in:
+
+```
+~/.local/share/ed-bio-helper/config.json
+```
+
+Delete this file to forget a remembered `--journal-dir`.
 
 ## Credits
 

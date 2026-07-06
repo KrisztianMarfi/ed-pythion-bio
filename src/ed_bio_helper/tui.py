@@ -165,7 +165,12 @@ def _get_predictions(state: AppState) -> tuple[list[dict], dict]:
 
     planet_class = scan.get('planet_class', '')
     bio_signals = scan.get('bio_signals')
-    if not planet_class or bio_signals == 0 or scan.get('landable') is False:
+    # `bio_signals` is None until an FSSBodySignals/SAASignalsFound event lands — and
+    # the game only emits those for bodies that *have* signals. A scanned body still
+    # sitting at None therefore has no biology, so treat None the same as 0 (matching
+    # the system-overview gate). Without this, no-signal bodies leak through and match
+    # the one signal-independent catalog entry (Crystalline Shards).
+    if not planet_class or not bio_signals or scan.get('landable') is False:
         return [], scan
 
     parent_ids: list[int] = scan.get('parent_body_ids', [])
@@ -431,7 +436,7 @@ def _build_prediction_panel(
             Text(msg, style='dim'),
             title='Predicted Species', border_style='blue',
         )
-    if scan.get('bio_signals') == 0:
+    if not scan.get('bio_signals'):
         return Panel(
             Text('(no biological signals detected)', style='dim'),
             title='Predicted Species', border_style='blue',

@@ -32,8 +32,8 @@ game.
 - **Stats report** — a bio-payout-by-star text report written on launch.
 - **Self-calibrating** — learns and widens its prediction rulesets from the
   spawns you actually confirm.
-- **Self-updating** — an Oh-My-Zsh-style check on startup that offers to pull a
-  newer tagged release (git installs only).
+- **Self-updating** — an Oh-My-Zsh-style check on startup that offers to
+  `pip install --upgrade` a newer release.
 
 ## Requirements
 
@@ -111,24 +111,28 @@ tested on Linux, so treat Windows as best-effort. Two things differ:
 - **Audio cues** rely on the Linux `paplay` command; on Windows they fall back to
   the terminal bell (`\a`).
 
-Install is the same (`pip install -e .`), and the startup update check works if
-[Git for Windows](https://git-scm.com/download/win) is installed. Use a terminal
-with decent ANSI support — Windows Terminal is recommended over the legacy console.
+Install is the same, and the startup update check works too — it uses pip, so no
+git is required. Use a terminal with decent ANSI support — Windows Terminal is
+recommended over the legacy console.
 
 ## Updating
 
-If you installed from a git clone, the app checks once a day on startup for a
-newer tagged release. When one exists it asks before doing anything:
+On startup the app checks GitHub (at most once a day) for a newer release. When
+one exists it asks before doing anything:
 
 ```
-  A new version of ed-bio-helper is available: v1.1.0 (you have v1.0.0).
+  A new version of ed-bio-helper is available: v1.2.0 (you have 1.1.0).
   Update now? [Y/n]
 ```
 
-Answer `Y` (the default) and it runs `git pull --ff-only` and restarts itself;
-answer `n` and it just starts. The check is best-effort — if you're offline, git
-isn't a checkout, or you're not on a terminal, it silently does nothing. Local
-commits are never clobbered (a diverged checkout prints a manual-pull hint).
+Answer `Y` (the default) and it runs `pip install --upgrade` against that
+release's source tarball, then restarts itself; answer `n` and it just starts.
+No git is needed — pip fetches the tarball over HTTPS.
+
+The check is best-effort and stays out of your way: it silently does nothing when
+you're offline, not on a terminal, or running a `pip install -e .` **editable dev
+checkout** (so your working copy is never touched). If the upgrade fails it prints
+the manual `pip install --upgrade …` command instead.
 
 Controls:
 

@@ -1,52 +1,34 @@
-"""Oh-My-Zsh-style self-update check.
+"""Startup self-update check (pip + GitHub source tarball).
 
-On live startup (throttled to once a day) this fetches the upstream git tags and,
-if a newer release tag exists than the one currently checked out, prompts the user
-to `git pull`. Detection is tag-only: releases are cut by tagging, so we compare the
-highest known tag against the tag reachable from HEAD.
+On live startup (throttled to once a day) this asks the GitHub API for the newest
+release tag and, if it is newer than the installed version, offers to run
+``pip install --upgrade <that tag's source tarball>``. No git is required on the
+user's machine — pip fetches the auto-generated ``.tar.gz`` over plain HTTPS.
 
-Everything here is best-effort. If the install is not a git checkout, git is
-missing, the network is down, or stdio is not a TTY, the check silently no-ops so
-the app always starts. Disable entirely with ``ED_BIO_HELPER_NO_UPDATE=1``; override
-the throttle (seconds) with ``ED_BIO_HELPER_UPDATE_INTERVAL``.
+Everything here is best-effort. It silently no-ops for editable/dev installs (so a
+``pip install -e .`` checkout is never clobbered), when the package metadata is
+missing, when the network is down, or when stdio is not a TTY. Disable entirely
+with ``ED_BIO_HELPER_NO_UPDATE=1``; override the throttle (seconds) with
+``ED_BIO_HELPER_UPDATE_INTERVAL``.
 """
 
+import json
 import os
 import subprocess
 import sys
 import time
+import urllib.request
+from importlib import metadata
 from pathlib import Path
 
+_PACKAGE = 'ed-bio-helper'
+_REPO = 'KrisztianMarfi/ed-pythion-bio'
+_TAGS_URL = f'https://api.github.com/repos/{_REPO}/tags?per_page=100'
+_TARBALL_URL = 'https://github.com/{repo}/archive/refs/tags/{tag}.tar.gz'
+
 _DEFAULT_INTERVAL = 24 * 60 * 60  # once per day
-_FETCH_TIMEOUT = 10  # seconds; keep startup snappy on a slow network
-_PULL_TIMEOUT = 60
-
-
-def _run_git(args: list[str], cwd: Path, timeout: float) -> str | None:
-    """Run a git command, returning its stdout (stripped) or None on any failure.
-
-    An empty string is a successful command with no output (e.g. `fetch`), which is
-    distinct from None — so callers test `is None` for failure, not truthiness.
-    """
-    try:
-        proc = subprocess.run(
-            ['git', *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    return proc.stdout.strip()
-
-
-def _repo_root() -> Path | None:
-    """The git checkout containing this package, or None if not installed from git."""
-    top = _run_git(['rev-parse', '--show-toplevel'], cwd=Path(__file__).resolve().parent, timeout=5)
-    return Path(top) if top else None
+_HTTP_TIMEOUT = 10  # seconds; keep startup snappy on a slow network
+_PIP_TIMEOUT = 300
 
 
 def _stamp_path() -> Path:
@@ -100,41 +82,91 @@ def _parse_version(tag: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _highest_tag(root: Path, extra_args: list[str] | None = None) -> str | None:
-    """Highest-version tag (by `-v:refname`) among those matched, or None if none.
-
-    `extra_args` narrows the set, e.g. `--merged HEAD` for tags reachable from HEAD.
-    Version-sort — not `git describe`, which orders by topology and would pick an
-    older tag when several sit on one commit.
-    """
-    out = _run_git(['tag', '--sort=-v:refname', *(extra_args or [])], cwd=root, timeout=5)
-    if not out:
+def _installed_version() -> str | None:
+    """The version pip recorded for this package, or None if it can't be read."""
+    try:
+        return metadata.version(_PACKAGE)
+    except metadata.PackageNotFoundError:
         return None
-    return out.splitlines()[0].strip()
 
 
-def _latest_tag(root: Path) -> str | None:
-    """Highest tag known to the checkout (includes tags just fetched from origin)."""
-    return _highest_tag(root)
+def _is_editable_install() -> bool:
+    """True for a `pip install -e .` dev checkout, which we must not auto-upgrade."""
+    try:
+        raw = metadata.distribution(_PACKAGE).read_text('direct_url.json')
+    except Exception:
+        return False
+    if not raw:
+        return False
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        return False
+    return bool(info.get('dir_info', {}).get('editable'))
 
 
-def _current_tag(root: Path) -> str | None:
-    """Highest tag reachable from HEAD — the release we're actually running.
+def _fetch_json(url: str) -> object | None:
+    """GET a JSON document, returning the parsed body or None on any failure.
 
-    None on a checkout with no tags in its history yet, in which case any upstream
-    tag counts as an available update.
+    Sends a User-Agent — the GitHub API rejects requests without one.
     """
-    return _highest_tag(root, ['--merged', 'HEAD'])
+    req = urllib.request.Request(
+        url,
+        headers={
+            'User-Agent': f'{_PACKAGE}-updater',
+            'Accept': 'application/vnd.github+json',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+            return json.loads(resp.read().decode('utf-8'))
+    except Exception:
+        return None
+
+
+def _latest_release() -> tuple[str, tuple[int, ...]] | None:
+    """Highest-version tag on the GitHub repo as (tag_name, version), or None.
+
+    The tags API isn't guaranteed to be version-sorted, so pick the max ourselves.
+    Using tags (not `releases/latest`) means simply pushing a tag is enough — no
+    formal GitHub Release required.
+    """
+    data = _fetch_json(_TAGS_URL)
+    if not isinstance(data, list):
+        return None
+    best: tuple[str, tuple[int, ...]] | None = None
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = item.get('name')
+        if not isinstance(name, str):
+            continue
+        version = _parse_version(name)
+        if version and (best is None or version > best[1]):
+            best = (name, version)
+    return best
+
+
+def _pip_upgrade(tag: str) -> bool:
+    """Run pip against the tag's source tarball. Streams pip's output to the user."""
+    url = _TARBALL_URL.format(repo=_REPO, tag=tag)
+    try:
+        proc = subprocess.run(
+            [sys.executable, '-m', 'pip', 'install', '--upgrade', url],
+            timeout=_PIP_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def _restart() -> None:
-    """Re-exec so the freshly pulled code runs, preserving the original arguments."""
+    """Re-exec so the freshly installed code runs, preserving the original arguments."""
     os.execvp(sys.executable, [sys.executable, '-m', 'ed_bio_helper', *sys.argv[1:]])
 
 
-def _prompt_and_update(root: Path, current: str | None, latest: str) -> None:
-    have = current or 'an untagged build'
-    print(f'\n  A new version of ed-bio-helper is available: {latest} (you have {have}).')
+def _prompt_and_update(tag: str, installed: str) -> None:
+    print(f'\n  A new version of ed-bio-helper is available: {tag} (you have {installed}).')
     try:
         answer = input('  Update now? [Y/n] ').strip().lower()
     except (EOFError, KeyboardInterrupt):
@@ -142,45 +174,41 @@ def _prompt_and_update(root: Path, current: str | None, latest: str) -> None:
         return
     if answer not in ('', 'y', 'yes'):
         return
-    print('  Updating via git pull...')
-    if _run_git(['pull', '--ff-only'], cwd=root, timeout=_PULL_TIMEOUT) is None:
-        print(
-            '  Update failed — local changes or diverged history. '
-            f'Pull manually with: git -C {root} pull\n'
-        )
+    print('  Updating via pip...\n')
+    if not _pip_upgrade(tag):
+        manual = _TARBALL_URL.format(repo=_REPO, tag=tag)
+        print(f'\n  Update failed. Upgrade manually with:\n    pip install --upgrade {manual}\n')
         return
-    print('  Updated. Restarting...\n')
+    print('\n  Updated. Restarting...\n')
     _restart()
 
 
 def check_for_update() -> None:
-    """Throttled startup check for a newer tagged release. Best-effort; never raises."""
+    """Throttled startup check for a newer release tarball. Best-effort; never raises."""
     if os.environ.get('ED_BIO_HELPER_NO_UPDATE'):
         return
     # Can't prompt without an interactive terminal; stay quiet under pipes/CI.
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return
 
+    installed = _installed_version()
+    if installed is None:
+        return  # no recorded metadata — can't compare, so do nothing
+    if _is_editable_install():
+        return  # dev checkout; the developer manages their own updates
+
     stamp = _stamp_path()
     if not _due(stamp, _interval()):
         return
-
-    root = _repo_root()
-    if root is None:
-        return  # installed some other way; nothing to pull
-
     # Stamp before the network call so a fetch failure or a declined prompt waits out
     # the throttle window instead of retrying (and re-prompting) on every launch.
     _touch(stamp)
 
-    if _run_git(['fetch', '--tags', '--quiet', 'origin'], cwd=root, timeout=_FETCH_TIMEOUT) is None:
+    latest = _latest_release()
+    if latest is None:
+        return
+    tag, latest_version = latest
+    if latest_version <= _parse_version(installed):
         return
 
-    latest = _latest_tag(root)
-    if not latest:
-        return
-    current = _current_tag(root)
-    if current and _parse_version(latest) <= _parse_version(current):
-        return
-
-    _prompt_and_update(root, current, latest)
+    _prompt_and_update(tag, installed)

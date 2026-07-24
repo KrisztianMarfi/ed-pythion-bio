@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -102,6 +103,13 @@ class AppState:
         # from journal history at startup, then grows on each Analyse and resets on a sale.
         self.unsold_credits: int = 0
 
+        # When True, save() is a no-op. Used to batch a burst of mutations (notably
+        # the startup journal replay in bootstrap_context, which fires hundreds of
+        # setters) into a single write instead of rewriting the whole state file on
+        # every event — the latter is O(events × state-size) and dominates startup
+        # once state.json grows large.
+        self._save_suspended: bool = False
+
         self._state_file = _state_path()
         self._load()
 
@@ -120,6 +128,8 @@ class AppState:
             pass
 
     def save(self) -> None:
+        if self._save_suspended:
+            return
         with self.lock:
             data = {
                 'samples': self.samples,
@@ -131,6 +141,23 @@ class AppState:
             self._state_file.write_text(json.dumps(data, indent=2))
         except OSError:
             pass
+
+    @contextmanager
+    def batched_save(self):
+        """Suspend per-setter saves for the duration, then persist once on exit.
+
+        For bursts of mutations (e.g. the startup journal replay) this turns hundreds
+        of full-file rewrites into a single one. Reentrant-safe: a nested use won't
+        prematurely re-enable saving.
+        """
+        already = self._save_suspended
+        self._save_suspended = True
+        try:
+            yield
+        finally:
+            if not already:
+                self._save_suspended = False
+                self.save()
 
     # ------------------------------------------------------------------
     # Helpers

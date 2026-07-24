@@ -531,19 +531,23 @@ def bootstrap_context(journal_dir: Path, state: AppState) -> None:
     those are already counted in the seeded session/unsold figures.
     """
     backfill_footfall(journal_dir, state)
-    for journal in _current_session_files(journal_dir):
-        try:
-            with journal.open(encoding='utf-8', errors='replace') as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        _dispatch(json.loads(line), state, bootstrap=True)
-                    except json.JSONDecodeError:
-                        pass
-        except OSError:
-            pass
+    # Replaying a whole session fires hundreds of state setters; batch their saves
+    # into one write on exit so bootstrap doesn't rewrite the (potentially multi-MB)
+    # state file per event. See AppState.batched_save.
+    with state.batched_save():
+        for journal in _current_session_files(journal_dir):
+            try:
+                with journal.open(encoding='utf-8', errors='replace') as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            _dispatch(json.loads(line), state, bootstrap=True)
+                        except json.JSONDecodeError:
+                            pass
+            except OSError:
+                pass
 
     # If a scan was in progress when the app last closed, current_genus will be
     # empty (LoadGame/Shutdown clears it). Best-effort restore from an incomplete
